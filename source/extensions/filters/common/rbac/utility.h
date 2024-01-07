@@ -32,6 +32,31 @@ namespace RBAC {
 struct RoleBasedAccessControlFilterStats {
   ENFORCE_RBAC_FILTER_STATS(GENERATE_COUNTER_STRUCT)
   SHADOW_RBAC_FILTER_STATS(GENERATE_COUNTER_STRUCT)
+
+  Stats::Scope& scope_;
+  const Stats::StatName stats_prefix_;
+  Stats::StatNameSetPtr stat_name_set_;
+  const Stats::StatName unknown_policy_allowed_;
+  const Stats::StatName unknown_policy_denied_;
+
+  // TODO move to initialisation?
+  void add_policy(const std::string& name) {
+    stat_name_set_->rememberBuiltin(absl::StrCat(name, ".allowed"));
+    stat_name_set_->rememberBuiltin(absl::StrCat(name, ".denied"));
+  }
+
+  void inc_policy_allowed(absl::string_view name) {
+    incCounter(stat_name_set_->getBuiltin(absl::StrCat(name, ".allowed"), unknown_policy_allowed_));
+  }
+
+  void inc_policy_denied(absl::string_view name) {
+    incCounter(stat_name_set_->getBuiltin(absl::StrCat(name, ".denied"), unknown_policy_denied_));
+  }
+
+  void incCounter(Stats::StatName name) {
+    Stats::SymbolTable::StoragePtr storage = scope_.symbolTable().join({stats_prefix_, name});
+    scope_.counterFromStatName(Stats::StatName(storage.get())).inc();
+  }
 };
 
 RoleBasedAccessControlFilterStats

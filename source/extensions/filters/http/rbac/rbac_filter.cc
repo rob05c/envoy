@@ -64,7 +64,12 @@ RoleBasedAccessControlFilterConfig::RoleBasedAccessControlFilterConfig(
       engine_(Filters::Common::RBAC::createEngine(proto_config, context, validation_visitor,
                                                   action_validation_visitor_)),
       shadow_engine_(Filters::Common::RBAC::createShadowEngine(
-          proto_config, context, validation_visitor, action_validation_visitor_)) {}
+          proto_config, context, validation_visitor, action_validation_visitor_)) {
+
+  for (const auto& policy : proto_config.rules().policies()) {
+    stats().add_policy(policy.first);
+  }
+}
 
 const Filters::Common::RBAC::RoleBasedAccessControlEngine*
 RoleBasedAccessControlFilterConfig::engine(const Http::StreamFilterCallbacks* callbacks,
@@ -83,20 +88,27 @@ RoleBasedAccessControlRouteSpecificFilterConfig::RoleBasedAccessControlRouteSpec
     const envoy::extensions::filters::http::rbac::v3::RBACPerRoute& per_route_config,
     Server::Configuration::ServerFactoryContext& context,
     ProtobufMessage::ValidationVisitor& validation_visitor) {
-  // Moved from member initializer to ctor body to overcome clang false warning about memory
-  // leak (clang-analyzer-cplusplus.NewDeleteLeaks,-warnings-as-errors).
-  // Potentially https://lists.llvm.org/pipermail/llvm-bugs/2018-July/066769.html
+  // Moved from member initializer to ctor body to overcome clang false warning
+  // about memory leak
+  // (clang-analyzer-cplusplus.NewDeleteLeaks,-warnings-as-errors). Potentially
+  // https://lists.llvm.org/pipermail/llvm-bugs/2018-July/066769.html
   engine_ = Filters::Common::RBAC::createEngine(per_route_config.rbac(), context,
                                                 validation_visitor, action_validation_visitor_);
   shadow_engine_ = Filters::Common::RBAC::createShadowEngine(
       per_route_config.rbac(), context, validation_visitor, action_validation_visitor_);
+
+  // TODO necessary?
+  // for (const auto &policy : per_route_config.rbac().policies()) {
+  //   config_->stats().add_policy(policy.first());
+  // }
 }
 
 Http::FilterHeadersStatus
 RoleBasedAccessControlFilter::decodeHeaders(Http::RequestHeaderMap& headers, bool) {
   ENVOY_LOG(
       debug,
-      "checking request: requestedServerName: {}, sourceIP: {}, directRemoteIP: {}, remoteIP: {},"
+      "checking request: requestedServerName: {}, sourceIP: {}, "
+      "directRemoteIP: {}, remoteIP: {},"
       "localAddress: {}, ssl: {}, headers: {}, dynamicMetadata: {}",
       callbacks_->connection()->requestedServerName(),
       callbacks_->connection()->connectionInfoProvider().remoteAddress()->asString(),
@@ -153,6 +165,7 @@ RoleBasedAccessControlFilter::decodeHeaders(Http::RequestHeaderMap& headers, boo
     if (allowed) {
       ENVOY_LOG(debug, "enforced allowed, matched policy {}", log_policy_id);
       config_->stats().allowed_.inc();
+      config_->stats().inc_policy_allowed(effective_policy_id);
       return Http::FilterHeadersStatus::Continue;
     } else {
       ENVOY_LOG(debug, "enforced denied, matched policy {}", log_policy_id);
@@ -160,6 +173,7 @@ RoleBasedAccessControlFilter::decodeHeaders(Http::RequestHeaderMap& headers, boo
                                  absl::nullopt,
                                  Filters::Common::RBAC::responseDetail(log_policy_id));
       config_->stats().denied_.inc();
+      config_->stats().inc_policy_denied(effective_policy_id);
       return Http::FilterHeadersStatus::StopIteration;
     }
   }
